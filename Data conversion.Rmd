@@ -1,0 +1,61 @@
+---
+title: "Data conversion"
+author: "Xinyang"
+date: "2025/2/7"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+```{r}
+# read raw data
+df_2h_5mM <- read.delim(paste0(getwd(),"/data/2h_5mM/GSM5112817_HeLa_5mM_RNaseR2h_anno.rRNA.bedpe"), header = F)
+df_2h_12mM <- read.table(paste0(getwd(),"/data/2h_12mM/GSM5112820_HeLa_25mM_RNaseR2h_anno.rRNA.only.txt"), header = F)
+df_2h_25mM <- read.delim(paste0(getwd(),"/data/2h_25mM/GSM5112824_HeLa_25mM_RNaseR2h_anno.rRNA.only.bedpe"), header = F)
+
+
+
+# get the contact matrix at 10nt rresolution
+binw <- 10
+nbin <- 507
+contact_2h_5mM <- df_2h_5mM %>% 
+  mutate(end1 = V3-4, end2 = V6-4) %>%
+  dplyr::select(end1, end2) %>%
+  filter(7925<=end1 & end1<=12994 & 7925<=end2 & end2<=12994) %>%
+  mutate(end1 = end1 - 7924, end2 = end2 - 7924)
+f <- bin2(as.matrix(contact_2h_5mM),
+          ab = matrix(c(1,1,nbin*binw+1,nbin*binw+1),nrow = 2) ,
+          nbin = c(nbin,nbin))
+contact_2h_5mM <- f$nc + t(f$nc)
+# subset of non-missing bin
+#id for non-zero coordinates and at least 1 count for each bin
+id_C <- which(colSums(contact_2h_5mM)!=0) 
+id_5mM <- id_C
+obc_out <- contact_2h_5mM[id_C, id_C]
+(nbin_C <- length(id_C))
+sum(obc_out!=0)/(nbin_C^2-nbin_C) # non-zero coverage
+write.table(obc_out, paste0(getwd(),"/data/2h_5mM/contact.txt"), row.names = F, col.names = F)
+
+
+
+contact_2h_12mM <- df_2h_12mM %>% 
+  mutate(end1 = V3-4, end2 = V6-4) %>%
+  dplyr::select(end1, end2) %>%
+  filter(7925<=end1 & end1<=12994 & 7925<=end2 & end2<=12994) %>%
+  mutate(end1 = end1 - 7924, end2 = end2 - 7924)
+f <- bin2(as.matrix(contact_2h_12mM),
+          ab = matrix(c(1,1,nbin*binw+1,nbin*binw+1),nrow = 2) ,
+          nbin = c(nbin,nbin))
+contact_2h_12mM <- f$nc + t(f$nc)
+id_C <- which(colSums(contact_2h_12mM)!=0) 
+id_12mM <- id_C
+obc_out <- contact_2h_12mM[id_C, id_C]
+(nbin_C <- length(id_C))
+sum(obc_out!=0)/(nbin_C^2-nbin_C) # non-zero coverage
+write.table(obc_out, paste0(getwd(),"/data/2h_12mM/contact.txt"), row.names = F, col.names = F)
+write.table(contact_2h_12mM[288:364,288:364], paste0(getwd(),"/data/2h_12mM/contact_es27.txt"), row.names = F, col.names = F)
+```
+

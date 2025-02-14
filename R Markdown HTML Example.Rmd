@@ -1,0 +1,224 @@
+---
+title: "R Markdown HTML Example"
+author: "Xinyang"
+date: "2025/2/7"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(plotly)
+library(tidyverse)
+library(ggsci)
+library(misc3d)
+library(vegan)
+library(RColorBrewer)
+library(MESS)
+library(ROCit)
+library(KernSmooth)
+library("plot3D")
+library(shapes)
+library(vegan)
+library(MASS)
+library(bio3d)
+library(ash)
+library(KernSmooth)
+library("plot3D")
+library(shapes)
+library(vegan)
+library(MASS)
+library(tidyverse)
+library(plotly)
+library(wesanderson)
+```
+
+
+```{r include=FALSE}
+# calculate ck that controls the non-zero rate and return simulated observed contact maps
+sim_obc <- function(trueD, beta = 1.5, coverage, S, noise, ck0) {
+  #trueD: is the true distance matrix(not in squared scale)
+  #beta: true conversion parameter
+  #coverage: non-zero rate we want to control
+  #S: number of contact maps needed to be generated
+  n <- nrow(trueD)
+  if(noise == T){  
+    ob_contact <- contact <- matrix(0, nrow = n, ncol = n)
+    ck = 0
+    while(sum(ob_contact!=0)/(n^2-n) < coverage) {
+      ck = ck + 0.1
+      for(i in 2:n) {
+        for(j in 1:(i-1)) {
+            contact[i,j] <- contact[j,i] <- trueD[i,j]^(-beta) #rate parameter matrix
+            ob_contact[i,j] <- ob_contact[j,i] <- rpois(1, ck*contact[i,j]) #observed contact maps
+        }
+      }
+    }
+    
+    obc <- array(0, dim = c(S,n,n)) # 100 observed contact maps
+    for(s in 1:S) {
+      for(i in 2:n) {
+        for(j in 1:(i-1)) {
+          obc[s,i,j] <- rpois(1, ck*contact[i,j])
+          obc[s,j,i] <- obc[s,i,j]         
+          }
+        }
+      }
+    }
+  if(noise == F){  
+    # contact <- matrix(0, nrow = n, ncol = n)
+    # ck = 0
+    # while(sum(contact!=0)/(n^2-n) < coverage) {
+    #   ck = ck + 0.1
+    #   contact <- round(ck*trueD^(-beta)) #rate parameter matrix
+    # 
+    # }
+    # 
+    # obc <- array(0, dim = c(S,n,n)) # 100 observed contact maps
+    # for(s in 1:S) {
+    #   for(i in 2:n) {
+    #     for(j in 1:(i-1)) {
+    #         obc[s,i,j] <- contact[i,j]
+    #         obc[s,j,i] <- obc[s,i,j] 
+    #       }
+    #     }
+    #   }
+    ck = 0
+    obc = round(100*trueD^(-beta))
+    }
+  list(obc = obc, expc = ck*contact, ck = ck)
+}
+
+```
+
+
+
+
+
+## Generate contact matrix
+```{r}
+# Case 1: For simulation study
+# Simulate contact matrix based on real RNA 3D structure
+Dir <- getwd()
+PDB <- read.pdb(file.path(Dir,"4P9R.pdb"))
+P <- PDB$atom[,9:11]
+trueD <- as.matrix(dist(P)) #distance matrix
+set.seed(1123)
+sim_res <- sim_obc(trueD, 1.5, 0.5, 1, noise = T)
+obc <- sim_res$obc[1,,] #simulated S contact maps
+
+# Case 2: For real data 
+# Binning SHARC-seq data to generage contact matrix
+
+
+# Visualize contact matrix
+obc[obc>10] <- 10
+diag(obc) <- max(obc)
+my_pal1 <- colorRampPalette(c("#fff7f4","#f9c9b3","#f3a07e","#e65739","#dc2619","#b8141d","#7d0811"))(100)
+par(las = 2)
+image(x=seq(1, 188,by=1), 
+      y=seq(1, 188,by=1), 
+      z=obc, 
+      col=my_pal1, useRaster=TRUE,
+      xlab = "",ylab="",
+      asp = 1, axes = F, xaxt = "n")
+```
+
+## WMDE Algorithm
+The algorithm takes contact matrix as input and generates optimal 3D structures. Below we show intermediates to better explain the rationale. 
+
+- Step 1
+
+We convert contact matrix to pre-distance matrices based on a sequence of conversion parameters.
+
+- Step 2
+
+Algorithm 1 solves 3D structure for each conversion parameter
+
+- Step 3
+
+The Poisson probabilistic model calculates likelihood for each candidate structure. The one with largest likelihood is selected as the optimal prediction.
+```{r}
+# function calculating negative likelihood
+Lik <- function(C, D2, beta) {
+  sumC <- sumtheta <- 0
+  n <- nrow(C)
+  for(i in 2:n) {
+    for(j in 1:(i-1)) {
+      sumC <- sumC + C[i,j]
+      sumtheta <- sumtheta + D2[i,j]^(-beta/2)
+    }
+  }
+  alphahat <- sumC / sumtheta
+
+  lik <- 0
+  for(i in 2:n) {
+    for(j in 1:(i-1)) {
+      lik <- lik + C[i,j] * (0.5*beta*log(D2[i,j]) - log(alphahat)) + alphahat * D2[i,j]^(-beta/2) + log(factorial(C[i,j]))
+    }
+  }
+  return(-lik)  
+}
+
+lik_res <- numeric(0)
+for(beta in 5:30) {
+  predP <- as.matrix(read.table(paste0(Dir,"/output_WMDE_50_beta/", beta, ".txt"), sep = ","))
+  predD <- as.matrix(dist(predP))
+  lik_res <- append(lik_res, Lik(obc,predD^2, beta/10))
+}
+
+
+hline <- function(y = 0, lty = "solid", color = "black") {
+  list(
+    type = "line",
+    line=list(dash = lty,color = color), 
+    x0 = 0, 
+    x1 = 1, 
+    xref = "paper",
+    y0 = y, 
+    y1 = y, 
+    layer = "below"
+  )
+}
+
+vline <- function(x = 0, lty = "solid", color = "black") {
+  list(
+    type = "line",
+    line=list(dash = lty,color = color), 
+    y0 = 0, 
+    y1 = 1, 
+    yref = "paper",
+    x0 = x, 
+    x1 = x, 
+    layer = "below"
+  )
+}
+
+fig <- plot_ly(x = seq(0.5,3,by = 0.1), y = lik_res, type = 'scatter', mode = 'lines+markers')
+fig %>%
+  layout(paper_bgcolor = "#FDFBEF",
+         plot_bgcolor = "#FDFBEF",
+         xaxis = list(title = list(text = TeX("\\beta"), font = list(size =30)),
+                      tickfont = list(size = 25),
+                      tickson = "inside",
+                      ticklen = 5,
+                      showgrid = F,
+                      range = c(0.39,3.1)),
+         yaxis = list(title = list(text = "Log-likelihood", font = list(size =30)),
+                      tickfont = list(size = 25),
+                      ticklen = 5,
+                      showgrid = T,
+                      exponentformat = "power"),
+         shapes = list(vline(0.4),
+                       hline(-7e4),
+                       vline(1.001, lty = "dash", color = "red"))) %>%
+  config(mathjax = 'cdn') 
+```
+
+
+
+
+
+
+
+
